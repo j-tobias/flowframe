@@ -10,6 +10,10 @@
 
 ---
 
+<video src="resources/github-demo.mp4" autoplay loop muted playsinline width="100%"></video>
+
+---
+
 ## What is FlowFrame?
 
 FlowFrame records smooth, top-to-bottom scrolling videos of any webpage using a headless browser. Point it at a URL and it captures the full page as it glides from top to bottom at a constant speed — no jitter, no manual recording.
@@ -38,7 +42,7 @@ flowframe --url https://example.com --output video.webm
 ## CLI Reference
 
 ```
-flowframe --url URL --output FILE [--resolution WxH] [--scroll-speed PX]
+flowframe --url URL --output FILE [--resolution WxH] [--scroll-speed PX] [--wallpaper]
 ```
 
 | Flag | Default | Description |
@@ -47,12 +51,16 @@ flowframe --url URL --output FILE [--resolution WxH] [--scroll-speed PX]
 | `--output` | required | Destination file — `.webm` or `.mp4` |
 | `--resolution` | `1920x1080` | Viewport size as `WIDTHxHEIGHT` |
 | `--scroll-speed` | `4.0` | Pixels scrolled per frame at ~60 fps |
+| `--wallpaper` | off | Composite over a macOS desktop wallpaper with rounded corners and shadow |
 
 **Examples:**
 
 ```bash
 # Desktop resolution
 flowframe --url https://example.com --output demo.webm
+
+# With macOS wallpaper framing (requires ffmpeg)
+flowframe --url https://example.com --output demo.mp4 --wallpaper
 
 # Vertical (Reels / Shorts)
 flowframe --url https://example.com --output demo.webm --resolution 1080x1920
@@ -70,13 +78,21 @@ import flowframe as fl
 
 fl.record(url="https://example.com", output="video.webm")
 
-# With options
+# With wallpaper framing
+fl.record(
+    url="https://example.com",
+    output="video.mp4",
+    wallpaper=True,
+)
+
+# Full options
 fl.record(
     url="https://example.com",
     output="video.mp4",
     width=1080,
     height=1920,
     scroll_speed=2.0,
+    wallpaper=True,
 )
 ```
 
@@ -97,4 +113,4 @@ The output format is determined automatically from the file extension.
 
 - Python ≥ 3.13
 - [Playwright](https://playwright.dev/python/) — `pip install playwright && playwright install chromium`
-- ffmpeg — only required for `.mp4` output
+- ffmpeg — required for `.mp4` output and `--wallpaper`

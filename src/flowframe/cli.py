@@ -71,6 +71,11 @@ def _print_help() -> None:
         "Pixels scrolled per frame at ~60 fps  [dim]default: 4.0[/dim]",
     )
     table.add_row(
+        "--wallpaper",
+        "",
+        "Composite over a macOS-style gradient background with rounded corners and shadow",
+    )
+    table.add_row(
         "-h, --help",
         "",
         "Show this message and exit",
@@ -128,6 +133,11 @@ def main() -> None:
         metavar="PX",
         help="Pixels scrolled per frame at ~60fps (default: 4.0)",
     )
+    parser.add_argument(
+        "--wallpaper",
+        action="store_true",
+        help="Composite over a macOS-style gradient background with rounded corners and shadow",
+    )
 
     args = parser.parse_args()
     width, height = args.resolution
@@ -140,6 +150,7 @@ def main() -> None:
             width=width,
             height=height,
             scroll_speed=args.scroll_speed,
+            wallpaper=args.wallpaper,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
