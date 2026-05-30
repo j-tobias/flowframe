@@ -16,10 +16,101 @@ def _resolution(value: str) -> tuple[int, int]:
         )
 
 
+def _print_help() -> None:
+    from rich import box
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    console = Console()
+
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold cyan]flowframe[/bold cyan]  [dim]v0.1.0[/dim]\n"
+            "[italic dim]Record a smooth-scrolling video of a webpage.[/italic dim]",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
+    console.print("[bold yellow]Usage[/bold yellow]")
+    console.print(
+        "  flowframe [bold green]--url[/bold green] URL"
+        " [bold green]--output[/bold green] FILE"
+        " [dim][[bold green]--resolution[/bold green] WxH][/dim]"
+        " [dim][[bold green]--scroll-speed[/bold green] PX][/dim]"
+    )
+    console.print()
+
+    console.print("[bold yellow]Arguments[/bold yellow]")
+    table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), show_edge=False)
+    table.add_column("flag", style="bold green", no_wrap=True)
+    table.add_column("meta", style="cyan", no_wrap=True)
+    table.add_column("description")
+
+    table.add_row(
+        "--url",
+        "URL",
+        "[bold red]required[/bold red]  URL of the webpage to record",
+    )
+    table.add_row(
+        "--output",
+        "FILE",
+        "[bold red]required[/bold red]  Destination file  [dim].mp4[/dim] or [dim].webm[/dim]",
+    )
+    table.add_row(
+        "--resolution",
+        "WxH",
+        "Viewport size  [dim]default: 1920x1080[/dim]",
+    )
+    table.add_row(
+        "--scroll-speed",
+        "PX",
+        "Pixels scrolled per frame at ~60 fps  [dim]default: 4.0[/dim]",
+    )
+    table.add_row(
+        "-h, --help",
+        "",
+        "Show this message and exit",
+    )
+    console.print(table)
+
+    console.print("[bold yellow]Examples[/bold yellow]")
+    console.print("  [dim]# Record a full-page scroll to MP4 (requires ffmpeg)[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://example.com"
+        " [green]--output[/green] demo.mp4"
+    )
+    console.print()
+    console.print("  [dim]# 720p WebM with faster scroll — no extra dependencies[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://example.com"
+        " [green]--output[/green] demo.webm"
+        " [green]--resolution[/green] 1280x720"
+        " [green]--scroll-speed[/green] 8"
+    )
+    console.print()
+
+    console.print("[bold yellow]Notes[/bold yellow]")
+    console.print("  [cyan]•[/cyan] [bold].mp4[/bold] output requires [cyan]ffmpeg[/cyan] on PATH"
+                  "  ([dim]apt install ffmpeg[/dim] / [dim]brew install ffmpeg[/dim])")
+    console.print("  [cyan]•[/cyan] [bold].webm[/bold] output works without any extra dependencies")
+    console.print()
+
+
 def main() -> None:
+    if "--help" in sys.argv or "-h" in sys.argv:
+        _print_help()
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(
         prog="flowframe",
         description="Record a smooth-scrolling video of a webpage.",
+        add_help=False,
     )
     parser.add_argument("--url", required=True, help="URL of the page to record")
     parser.add_argument("--output", required=True, help="Destination file (.mp4 or .webm)")

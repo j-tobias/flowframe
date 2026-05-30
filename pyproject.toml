@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "playwright>=1.40.0",
+    "rich>=13.0.0",
 ]
 
 [project.scripts]
