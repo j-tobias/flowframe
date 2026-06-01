@@ -53,7 +53,7 @@ def _print_help() -> None:
     table.add_row(
         "--url",
         "URL",
-        "[bold red]required[/bold red]  URL of the webpage to record",
+        "[bold red]required[/bold red]  URL of the webpage [dim](or PDF)[/dim] to record",
     )
     table.add_row(
         "--output",
@@ -99,6 +99,14 @@ def _print_help() -> None:
         " [green]--scroll-speed[/green] 8"
     )
     console.print()
+    console.print("  [dim]# Record a PDF — every page rendered and scrolled like a web page[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://arxiv.org/pdf/2502.12345"
+        " [green]--output[/green] paper.webm"
+        " [green]--scroll-speed[/green] 30"
+    )
+    console.print()
 
     console.print("[bold yellow]Notes[/bold yellow]")
     console.print("  [cyan]•[/cyan] A [bold]PDF[/bold] URL is rendered and scrolled just like a web page")
@@ -118,7 +126,7 @@ def main() -> None:
         description="Record a smooth-scrolling video of a webpage.",
         add_help=False,
     )
-    parser.add_argument("--url", required=True, help="URL of the page to record")
+    parser.add_argument("--url", required=True, help="URL of the page or PDF to record")
     parser.add_argument("--output", required=True, help="Destination file (.mp4 or .webm)")
     parser.add_argument(
         "--resolution",
