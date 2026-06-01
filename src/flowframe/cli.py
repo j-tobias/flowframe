@@ -101,6 +101,7 @@ def _print_help() -> None:
     console.print()
 
     console.print("[bold yellow]Notes[/bold yellow]")
+    console.print("  [cyan]•[/cyan] A [bold]PDF[/bold] URL is rendered and scrolled just like a web page")
     console.print("  [cyan]•[/cyan] [bold].mp4[/bold] output requires [cyan]ffmpeg[/cyan] on PATH"
                   "  ([dim]apt install ffmpeg[/dim] / [dim]brew install ffmpeg[/dim])")
     console.print("  [cyan]•[/cyan] [bold].webm[/bold] output works without any extra dependencies")

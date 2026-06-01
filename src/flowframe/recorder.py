@@ -7,6 +7,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from flowframe.pdf import render_pdf_to_html, try_load_pdf
+
 _WALLPAPER = Path(__file__).parent / "resources" / "13-Ventura-Dark.webp"
 
 
@@ -75,8 +77,12 @@ def record(
 ) -> None:
     """Record a smooth-scrolling video of a webpage.
 
+    If *url* points at a PDF (by suffix, ``Content-Type`` or magic bytes), the
+    PDF is rasterised into a stacked-image HTML page and scroll-recorded exactly
+    like any other page.
+
     Args:
-        url: The page to record.
+        url: The page or PDF to record.
         output: Destination path — must end in ``.mp4`` or ``.webm``.
         width: Viewport width in pixels.
         height: Viewport height in pixels.
@@ -123,6 +129,13 @@ def record(
     """
 
     with tempfile.TemporaryDirectory() as tmp_dir:
+        # A PDF URL can't be scrolled in headless Chromium, so render it to a
+        # local stacked-image HTML page and record that instead.
+        nav_url = url
+        pdf_bytes = try_load_pdf(url)
+        if pdf_bytes is not None:
+            nav_url = render_pdf_to_html(pdf_bytes, Path(tmp_dir) / "pdf", width)
+
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
             context = browser.new_context(
@@ -131,7 +144,7 @@ def record(
                 record_video_size={"width": width, "height": height},
             )
             page = context.new_page()
-            page.goto(url, wait_until="networkidle")
+            page.goto(nav_url, wait_until="networkidle")
             page.evaluate(js_scroll)
 
             # Must read before context.close() — afterwards .video becomes None.

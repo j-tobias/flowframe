@@ -18,6 +18,8 @@
 
 FlowFrame records smooth, top-to-bottom scrolling videos of any webpage using a headless browser. Point it at a URL and it captures the full page as it glides from top to bottom at a constant speed — no jitter, no manual recording.
 
+Point it at a **PDF** URL (or local PDF) and FlowFrame renders every page and scroll-records it just like a web page — same resolution, scroll-speed and `--wallpaper` options apply.
+
 Output is a `.webm` file by default, or a `.mp4` if ffmpeg is available. Resolution and scroll speed are configurable. Works as a CLI tool or as a Python library.
 
 ---
@@ -67,7 +69,12 @@ flowframe --url https://example.com --output demo.webm --resolution 1080x1920
 
 # Slower scroll
 flowframe --url https://example.com --output demo.webm --scroll-speed 2
+
+# Record a PDF — every page is rendered and scrolled like a web page
+flowframe --url https://arxiv.org/pdf/2502.12345 --output paper.webm --scroll-speed 30
 ```
+
+> **Tip:** long PDFs stack into a very tall page, so at the default `--scroll-speed 4` a multi-page paper can take several minutes. Bump `--scroll-speed` (e.g. `30`–`40`) for a shorter clip.
 
 ---
 
@@ -114,3 +121,4 @@ The output format is determined automatically from the file extension.
 - Python ≥ 3.13
 - [Playwright](https://playwright.dev/python/) — `pip install playwright && playwright install chromium`
 - ffmpeg — required for `.mp4` output and `--wallpaper`
+- PDF rendering (`pypdfium2`, `pillow`) is bundled — no system packages needed
