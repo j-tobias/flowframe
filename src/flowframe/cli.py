@@ -41,6 +41,8 @@ def _print_help() -> None:
         " [bold green]--output[/bold green] FILE"
         " [dim][[bold green]--resolution[/bold green] WxH][/dim]"
         " [dim][[bold green]--scroll-speed[/bold green] PX][/dim]"
+        " [dim][[bold green]--wallpaper[/bold green]][/dim]"
+        " [dim][[bold green]--max-duration[/bold green] SECS][/dim]"
     )
     console.print()
 
@@ -76,6 +78,11 @@ def _print_help() -> None:
         "Composite over a macOS-style gradient background with rounded corners and shadow",
     )
     table.add_row(
+        "--max-duration",
+        "SECS",
+        "Cap video length in seconds  [dim]default: full page[/dim]",
+    )
+    table.add_row(
         "-h, --help",
         "",
         "Show this message and exit",
@@ -107,9 +114,19 @@ def _print_help() -> None:
         " [green]--scroll-speed[/green] 30"
     )
     console.print()
+    console.print("  [dim]# Cap the clip at 10 seconds regardless of page length[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://example.com"
+        " [green]--output[/green] demo.webm"
+        " [green]--max-duration[/green] 10"
+    )
+    console.print()
 
     console.print("[bold yellow]Notes[/bold yellow]")
     console.print("  [cyan]•[/cyan] A [bold]PDF[/bold] URL is rendered and scrolled just like a web page")
+    console.print("  [cyan]•[/cyan] [bold]--max-duration[/bold] truncates at the cap "
+                  "([dim]it does not speed up scrolling to fit[/dim])")
     console.print("  [cyan]•[/cyan] [bold].mp4[/bold] output requires [cyan]ffmpeg[/cyan] on PATH"
                   "  ([dim]apt install ffmpeg[/dim] / [dim]brew install ffmpeg[/dim])")
     console.print("  [cyan]•[/cyan] [bold].webm[/bold] output works without any extra dependencies")
@@ -147,6 +164,13 @@ def main() -> None:
         action="store_true",
         help="Composite over a macOS-style gradient background with rounded corners and shadow",
     )
+    parser.add_argument(
+        "--max-duration",
+        default=None,
+        type=float,
+        metavar="SECS",
+        help="Maximum video length in seconds (default: full page)",
+    )
 
     args = parser.parse_args()
     width, height = args.resolution
@@ -160,6 +184,7 @@ def main() -> None:
             height=height,
             scroll_speed=args.scroll_speed,
             wallpaper=args.wallpaper,
+            max_duration=args.max_duration,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

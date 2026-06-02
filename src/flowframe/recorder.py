@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 from flowframe.pdf import render_pdf_to_html, try_load_pdf
+from flowframe.utils import (
+    build_scroll_script,
+    ensure_ffmpeg,
+    run_ffmpeg,
+    validate_output_suffix,
+)
 
 _WALLPAPER = Path(__file__).parent / "resources" / "13-Ventura-Dark.webp"
 
@@ -17,6 +22,7 @@ def _composite_wallpaper(
     output_path: Path,
     width: int,
     height: int,
+    max_duration: float | None,
 ) -> None:
     scale = 0.88
     corner_r = 20   # rounded corner radius (px, in scaled-video space)
@@ -52,18 +58,84 @@ def _composite_wallpaper(
         f"[bgs][rnd2]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2",
     ])
 
-    result = subprocess.run(
-        ["ffmpeg", "-y",
-         "-ss", "1", "-i", str(webm_path),   # skip the loading blank first second
+    cap = ["-t", str(max_duration)] if max_duration is not None else []
+    run_ffmpeg(
+        ["-ss", "1", "-i", str(webm_path),   # skip the loading blank first second
          "-i", str(_WALLPAPER),
          "-filter_complex", fc,
+         *cap,
          "-shortest", str(output_path)],
-        capture_output=True,
-        text=True,
+        what="wallpaper compositing",
     )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg wallpaper compositing failed (exit {result.returncode}):\n{result.stderr}"
+
+
+def _resolve_nav_url(url: str, tmp_dir: str, width: int) -> str:
+    """Return the URL to navigate to, rendering PDFs to a local HTML page first.
+
+    A PDF URL can't be scrolled in headless Chromium, so it's rasterised into a
+    stacked-image HTML page; ordinary URLs pass through unchanged.
+    """
+    pdf_bytes = try_load_pdf(url)
+    if pdf_bytes is None:
+        return url
+    return render_pdf_to_html(pdf_bytes, Path(tmp_dir) / "pdf", width)
+
+
+def _capture_scroll(
+    nav_url: str,
+    tmp_dir: str,
+    width: int,
+    height: int,
+    script: str,
+) -> Path:
+    """Open *nav_url*, run the scroll *script*, and return the raw ``.webm`` path."""
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={"width": width, "height": height},
+            record_video_dir=tmp_dir,
+            record_video_size={"width": width, "height": height},
+        )
+        page = context.new_page()
+        page.goto(nav_url, wait_until="networkidle")
+        page.evaluate(script)
+
+        # Must read before context.close() — afterwards .video becomes None.
+        webm_path = Path(page.video.path())
+
+        context.close()  # flushes and finalises the .webm on disk
+        browser.close()
+
+    return webm_path
+
+
+def _finalize(
+    webm_path: Path,
+    output_path: Path,
+    suffix: str,
+    wallpaper: bool,
+    width: int,
+    height: int,
+    max_duration: float | None,
+) -> None:
+    """Produce the final output from the raw recording.
+
+    Wallpaper compositing and plain ffmpeg conversion (.mp4, or .webm when ffmpeg
+    is available) trim the 1s loading lead-in and hard-cap the length to
+    *max_duration*. The only path that does neither is a .webm copy made when
+    ffmpeg isn't installed — there the scroll-loop cap is the only bound.
+    """
+    if wallpaper:
+        _composite_wallpaper(webm_path, output_path, width, height, max_duration)
+    elif suffix == ".webm" and shutil.which("ffmpeg") is None:
+        # No ffmpeg available — copy as-is, skip the 1-second trim
+        shutil.copy2(webm_path, output_path)
+    else:
+        # mp4, or webm with ffmpeg available (trim the loading blank first second)
+        cap = ["-t", str(max_duration)] if max_duration is not None else []
+        run_ffmpeg(
+            ["-ss", "1", "-i", str(webm_path), *cap, str(output_path)],
+            what="conversion",
         )
 
 
@@ -74,6 +146,7 @@ def record(
     height: int = 1080,
     scroll_speed: float = 4.0,
     wallpaper: bool = False,
+    max_duration: float | None = None,
 ) -> None:
     """Record a smooth-scrolling video of a webpage.
 
@@ -89,83 +162,28 @@ def record(
         scroll_speed: Pixels scrolled per frame at ~60 fps.
         wallpaper: Composite the recording over a macOS Ventura desktop wallpaper
             with rounded corners and a soft drop shadow.
+        max_duration: Maximum video length in seconds. When set, scrolling stops
+            at the cap even if the page bottom isn't reached (truncate, not
+            speed-up). ``None`` records the full page.
 
     Raises:
-        ValueError: If *output* does not end in ``.mp4`` or ``.webm``.
+        ValueError: If *output* has an unsupported suffix or *max_duration* <= 0.
         FileNotFoundError: If ffmpeg is required but not on PATH.
         RuntimeError: If ffmpeg conversion or compositing fails.
     """
     output_path = Path(output)
-    suffix = output_path.suffix.lower()
+    suffix = validate_output_suffix(output_path)
 
-    if suffix not in {".mp4", ".webm"}:
-        raise ValueError(
-            f"Output must end in .mp4 or .webm, got: {output_path.name!r}"
-        )
+    if max_duration is not None and max_duration <= 0:
+        raise ValueError(f"max_duration must be positive, got: {max_duration}")
+
+    if suffix == ".mp4" or wallpaper:
+        ensure_ffmpeg("--wallpaper" if wallpaper else ".mp4 output")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    needs_ffmpeg = suffix == ".mp4" or wallpaper
-    if needs_ffmpeg and shutil.which("ffmpeg") is None:
-        reason = "--wallpaper" if wallpaper else ".mp4 output"
-        raise FileNotFoundError(
-            f"ffmpeg is required for {reason} but was not found on PATH.\n"
-            "Install it first:\n"
-            "  Debian/Ubuntu:  sudo apt install ffmpeg\n"
-            "  macOS:          brew install ffmpeg\n"
-            "Or record to .webm without --wallpaper to skip this requirement."
-        )
-
-    js_scroll = f"""
-        () => new Promise((resolve) => {{
-            const id = setInterval(() => {{
-                window.scrollBy(0, {scroll_speed});
-                if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight) {{
-                    clearInterval(id);
-                    resolve();
-                }}
-            }}, 16);
-        }})
-    """
+    script = build_scroll_script(scroll_speed, max_duration)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # A PDF URL can't be scrolled in headless Chromium, so render it to a
-        # local stacked-image HTML page and record that instead.
-        nav_url = url
-        pdf_bytes = try_load_pdf(url)
-        if pdf_bytes is not None:
-            nav_url = render_pdf_to_html(pdf_bytes, Path(tmp_dir) / "pdf", width)
-
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
-                viewport={"width": width, "height": height},
-                record_video_dir=tmp_dir,
-                record_video_size={"width": width, "height": height},
-            )
-            page = context.new_page()
-            page.goto(nav_url, wait_until="networkidle")
-            page.evaluate(js_scroll)
-
-            # Must read before context.close() — afterwards .video becomes None.
-            webm_path = Path(page.video.path())
-
-            context.close()  # flushes and finalises the .webm on disk
-            browser.close()
-
-        if wallpaper:
-            _composite_wallpaper(webm_path, output_path, width, height)
-        elif suffix == ".webm" and shutil.which("ffmpeg") is None:
-            # No ffmpeg available — copy as-is, skip the 1-second trim
-            shutil.copy2(webm_path, output_path)
-        else:
-            # mp4, or webm with ffmpeg available (trim the loading blank first second)
-            result = subprocess.run(
-                ["ffmpeg", "-y", "-ss", "1", "-i", str(webm_path), str(output_path)],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"ffmpeg conversion failed (exit {result.returncode}):\n{result.stderr}"
-                )
+        nav_url = _resolve_nav_url(url, tmp_dir, width)
+        webm_path = _capture_scroll(nav_url, tmp_dir, width, height, script)
+        _finalize(webm_path, output_path, suffix, wallpaper, width, height, max_duration)
