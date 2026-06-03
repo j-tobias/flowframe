@@ -43,6 +43,7 @@ def _print_help() -> None:
         " [dim][[bold green]--scroll-speed[/bold green] PX][/dim]"
         " [dim][[bold green]--wallpaper[/bold green]][/dim]"
         " [dim][[bold green]--max-duration[/bold green] SECS][/dim]"
+        " [dim][[bold green]--timeout[/bold green] MS][/dim]"
     )
     console.print()
 
@@ -83,6 +84,11 @@ def _print_help() -> None:
         "Cap video length in seconds  [dim]default: full page[/dim]",
     )
     table.add_row(
+        "--timeout",
+        "MS",
+        "Navigation timeout in milliseconds  [dim]default: 30000[/dim]",
+    )
+    table.add_row(
         "-h, --help",
         "",
         "Show this message and exit",
@@ -120,6 +126,14 @@ def _print_help() -> None:
         " [green]--url[/green] https://example.com"
         " [green]--output[/green] demo.webm"
         " [green]--max-duration[/green] 10"
+    )
+    console.print()
+    console.print("  [dim]# Raise the navigation timeout for slow or dynamic pages[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://github.com/org/repo"
+        " [green]--output[/green] demo.mp4"
+        " [green]--timeout[/green] 90000"
     )
     console.print()
 
@@ -171,6 +185,13 @@ def main() -> None:
         metavar="SECS",
         help="Maximum video length in seconds (default: full page)",
     )
+    parser.add_argument(
+        "--timeout",
+        default=30000,
+        type=float,
+        metavar="MS",
+        help="Navigation timeout in milliseconds (default: 30000)",
+    )
 
     args = parser.parse_args()
     width, height = args.resolution
@@ -185,6 +206,7 @@ def main() -> None:
             scroll_speed=args.scroll_speed,
             wallpaper=args.wallpaper,
             max_duration=args.max_duration,
+            timeout=args.timeout,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

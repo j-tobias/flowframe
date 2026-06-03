@@ -44,7 +44,7 @@ flowframe --url https://example.com --output video.webm
 ## CLI Reference
 
 ```
-flowframe --url URL --output FILE [--resolution WxH] [--scroll-speed PX] [--wallpaper] [--max-duration SECS]
+flowframe --url URL --output FILE [--resolution WxH] [--scroll-speed PX] [--wallpaper] [--max-duration SECS] [--timeout MS]
 ```
 
 | Flag | Default | Description |
@@ -55,6 +55,7 @@ flowframe --url URL --output FILE [--resolution WxH] [--scroll-speed PX] [--wall
 | `--scroll-speed` | `4.0` | Pixels scrolled per frame at ~60 fps |
 | `--wallpaper` | off | Composite over a macOS desktop wallpaper with rounded corners and shadow |
 | `--max-duration` | full page | Cap video length in seconds — truncates the scroll at the cap |
+| `--timeout` | `30000` | Navigation timeout in milliseconds — raise it for slow or dynamic pages |
 
 **Examples:**
 
@@ -76,6 +77,9 @@ flowframe --url https://arxiv.org/pdf/2502.12345 --output paper.webm --scroll-sp
 
 # Cap the clip at 10 seconds regardless of page length
 flowframe --url https://arxiv.org/pdf/2502.12345 --output paper.webm --max-duration 10
+
+# Raise the navigation timeout for slow or dynamic pages (e.g. GitHub repos)
+flowframe --url https://github.com/org/repo --output demo.mp4 --timeout 90000
 ```
 
 > **Tip:** long PDFs stack into a very tall page, so at the default `--scroll-speed 4` a multi-page paper can take several minutes. Bump `--scroll-speed` (e.g. `30`–`40`) for a shorter clip, or set `--max-duration` to hard-cap the length.
@@ -105,6 +109,7 @@ fl.record(
     scroll_speed=2.0,
     wallpaper=True,
     max_duration=10,  # seconds; omit for the full page
+    timeout=90000,    # navigation timeout in ms; default 30000
 )
 ```
 

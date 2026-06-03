@@ -87,6 +87,7 @@ def _capture_scroll(
     width: int,
     height: int,
     script: str,
+    timeout: float,
 ) -> Path:
     """Open *nav_url*, run the scroll *script*, and return the raw ``.webm`` path."""
     with sync_playwright() as pw:
@@ -97,6 +98,7 @@ def _capture_scroll(
             record_video_size={"width": width, "height": height},
         )
         page = context.new_page()
+        page.set_default_navigation_timeout(timeout)
         page.goto(nav_url, wait_until="networkidle")
         page.evaluate(script)
 
@@ -147,6 +149,7 @@ def record(
     scroll_speed: float = 4.0,
     wallpaper: bool = False,
     max_duration: float | None = None,
+    timeout: float = 30000,
 ) -> None:
     """Record a smooth-scrolling video of a webpage.
 
@@ -165,6 +168,9 @@ def record(
         max_duration: Maximum video length in seconds. When set, scrolling stops
             at the cap even if the page bottom isn't reached (truncate, not
             speed-up). ``None`` records the full page.
+        timeout: Navigation timeout in milliseconds for the initial page load.
+            Raise this for slow or dynamic pages whose ``networkidle`` never
+            settles within the default 30 s.
 
     Raises:
         ValueError: If *output* has an unsupported suffix or *max_duration* <= 0.
@@ -177,6 +183,9 @@ def record(
     if max_duration is not None and max_duration <= 0:
         raise ValueError(f"max_duration must be positive, got: {max_duration}")
 
+    if timeout < 0:
+        raise ValueError(f"timeout must be non-negative, got: {timeout}")
+
     if suffix == ".mp4" or wallpaper:
         ensure_ffmpeg("--wallpaper" if wallpaper else ".mp4 output")
 
@@ -185,5 +194,5 @@ def record(
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         nav_url = _resolve_nav_url(url, tmp_dir, width)
-        webm_path = _capture_scroll(nav_url, tmp_dir, width, height, script)
+        webm_path = _capture_scroll(nav_url, tmp_dir, width, height, script, timeout)
         _finalize(webm_path, output_path, suffix, wallpaper, width, height, max_duration)
