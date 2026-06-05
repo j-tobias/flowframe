@@ -44,6 +44,8 @@ def _print_help() -> None:
         " [dim][[bold green]--wallpaper[/bold green]][/dim]"
         " [dim][[bold green]--max-duration[/bold green] SECS][/dim]"
         " [dim][[bold green]--timeout[/bold green] MS][/dim]"
+        " [dim][[bold green]--storage-state[/bold green] FILE][/dim]"
+        " [dim][[bold green]--cookie[/bold green] STR][/dim]"
     )
     console.print()
 
@@ -87,6 +89,16 @@ def _print_help() -> None:
         "--timeout",
         "MS",
         "Navigation timeout in milliseconds  [dim]default: 30000[/dim]",
+    )
+    table.add_row(
+        "--storage-state",
+        "FILE",
+        "Playwright storage-state JSON (cookies + localStorage) injected before load",
+    )
+    table.add_row(
+        "--cookie",
+        "STR",
+        "Inline cookie  [dim]'name=value; domain=example.com'[/dim]  (repeatable)",
     )
     table.add_row(
         "-h, --help",
@@ -136,6 +148,22 @@ def _print_help() -> None:
         " [green]--timeout[/green] 90000"
     )
     console.print()
+    console.print("  [dim]# Suppress a cookie consent banner via inline cookie[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://example.com"
+        " [green]--output[/green] demo.mp4"
+        " [green]--cookie[/green] \"cookieconsent_status=dismiss; domain=example.com\""
+    )
+    console.print()
+    console.print("  [dim]# Reuse a saved Playwright storage-state file[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://example.com"
+        " [green]--output[/green] demo.mp4"
+        " [green]--storage-state[/green] ./cookies.json"
+    )
+    console.print()
 
     console.print("[bold yellow]Notes[/bold yellow]")
     console.print("  [cyan]•[/cyan] A [bold]PDF[/bold] URL is rendered and scrolled just like a web page")
@@ -144,6 +172,10 @@ def _print_help() -> None:
     console.print("  [cyan]•[/cyan] [bold].mp4[/bold] output requires [cyan]ffmpeg[/cyan] on PATH"
                   "  ([dim]apt install ffmpeg[/dim] / [dim]brew install ffmpeg[/dim])")
     console.print("  [cyan]•[/cyan] [bold].webm[/bold] output works without any extra dependencies")
+    console.print("  [cyan]•[/cyan] [bold]--cookie[/bold] can be repeated for multiple cookies"
+                  "  ([dim]'name=value; domain=...'[/dim])")
+    console.print("  [cyan]•[/cyan] [bold]--storage-state[/bold] and [bold]--cookie[/bold] can be combined"
+                  "  ([dim]cookies are applied on top[/dim])")
     console.print()
 
 
@@ -192,6 +224,18 @@ def main() -> None:
         metavar="MS",
         help="Navigation timeout in milliseconds (default: 30000)",
     )
+    parser.add_argument(
+        "--storage-state",
+        default=None,
+        metavar="FILE",
+        help="Playwright storage-state JSON (cookies + localStorage) to inject before navigation",
+    )
+    parser.add_argument(
+        "--cookie",
+        action="append",
+        metavar="STR",
+        help="Inline cookie 'name=value; domain=example.com' (can be repeated)",
+    )
 
     args = parser.parse_args()
     width, height = args.resolution
@@ -207,6 +251,8 @@ def main() -> None:
             wallpaper=args.wallpaper,
             max_duration=args.max_duration,
             timeout=args.timeout,
+            storage_state=args.storage_state,
+            cookies=args.cookie,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

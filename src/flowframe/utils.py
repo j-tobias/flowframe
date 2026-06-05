@@ -13,6 +13,49 @@ from pathlib import Path
 _VALID_SUFFIXES = {".mp4", ".webm"}
 
 
+def parse_cookie_string(cookie_str: str) -> dict:
+    """Parse a Set-Cookie-style string into a Playwright cookie dict.
+
+    Expected format: ``name=value; domain=example.com[; path=/; ...]``
+    At least one of ``domain`` or ``url`` must be present.
+    """
+    parts = [p.strip() for p in cookie_str.split(";")]
+    if not parts or "=" not in parts[0]:
+        raise ValueError(
+            f"Invalid --cookie value — expected 'name=value[; attr=val ...]', got: {cookie_str!r}"
+        )
+    name, _, value = parts[0].partition("=")
+    cookie: dict = {"name": name.strip(), "value": value}
+    for part in parts[1:]:
+        if not part:
+            continue
+        key, _, val = part.partition("=")
+        key = key.strip().lower()
+        val = val.strip()
+        if key == "domain":
+            cookie["domain"] = val
+        elif key == "path":
+            cookie["path"] = val
+        elif key == "url":
+            cookie["url"] = val
+        elif key == "expires":
+            try:
+                cookie["expires"] = float(val)
+            except ValueError:
+                pass
+        elif key == "httponly":
+            cookie["httpOnly"] = True
+        elif key == "secure":
+            cookie["secure"] = True
+        elif key == "samesite":
+            cookie["sameSite"] = val
+    if "domain" not in cookie and "url" not in cookie:
+        raise ValueError(
+            f"--cookie must include a domain or url attribute, got: {cookie_str!r}"
+        )
+    return cookie
+
+
 def validate_output_suffix(output: Path) -> str:
     """Return the lowercased output suffix, or raise if it isn't supported."""
     suffix = output.suffix.lower()

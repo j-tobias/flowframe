@@ -10,6 +10,7 @@ from flowframe.pdf import render_pdf_to_html, try_load_pdf
 from flowframe.utils import (
     build_scroll_script,
     ensure_ffmpeg,
+    parse_cookie_string,
     run_ffmpeg,
     validate_output_suffix,
 )
@@ -88,6 +89,8 @@ def _capture_scroll(
     height: int,
     script: str,
     timeout: float,
+    storage_state: str | None = None,
+    extra_cookies: list[dict] | None = None,
 ) -> Path:
     """Open *nav_url*, run the scroll *script*, and return the raw ``.webm`` path."""
     with sync_playwright() as pw:
@@ -96,7 +99,10 @@ def _capture_scroll(
             viewport={"width": width, "height": height},
             record_video_dir=tmp_dir,
             record_video_size={"width": width, "height": height},
+            storage_state=storage_state,
         )
+        if extra_cookies:
+            context.add_cookies(extra_cookies)
         page = context.new_page()
         page.set_default_navigation_timeout(timeout)
         page.goto(nav_url, wait_until="networkidle")
@@ -150,6 +156,8 @@ def record(
     wallpaper: bool = False,
     max_duration: float | None = None,
     timeout: float = 30000,
+    storage_state: str | None = None,
+    cookies: list[str] | None = None,
 ) -> None:
     """Record a smooth-scrolling video of a webpage.
 
@@ -171,10 +179,18 @@ def record(
         timeout: Navigation timeout in milliseconds for the initial page load.
             Raise this for slow or dynamic pages whose ``networkidle`` never
             settles within the default 30 s.
+        storage_state: Path to a Playwright storage-state JSON file (cookies +
+            localStorage). Injected into the browser context before navigation so
+            the page loads as if already authenticated / consent accepted.
+        cookies: List of inline cookie strings in Set-Cookie style,
+            e.g. ``["name=value; domain=example.com"]``. Applied on top of any
+            *storage_state* that was also provided.
 
     Raises:
-        ValueError: If *output* has an unsupported suffix or *max_duration* <= 0.
-        FileNotFoundError: If ffmpeg is required but not on PATH.
+        ValueError: If *output* has an unsupported suffix, *max_duration* <= 0,
+            or a cookie string is malformed.
+        FileNotFoundError: If ffmpeg is required but not on PATH, or
+            *storage_state* path does not exist.
         RuntimeError: If ffmpeg conversion or compositing fails.
     """
     output_path = Path(output)
@@ -186,6 +202,11 @@ def record(
     if timeout < 0:
         raise ValueError(f"timeout must be non-negative, got: {timeout}")
 
+    if storage_state is not None and not Path(storage_state).is_file():
+        raise FileNotFoundError(f"--storage-state file not found: {storage_state!r}")
+
+    extra_cookies = [parse_cookie_string(c) for c in cookies] if cookies else None
+
     if suffix == ".mp4" or wallpaper:
         ensure_ffmpeg("--wallpaper" if wallpaper else ".mp4 output")
 
@@ -194,5 +215,9 @@ def record(
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         nav_url = _resolve_nav_url(url, tmp_dir, width)
-        webm_path = _capture_scroll(nav_url, tmp_dir, width, height, script, timeout)
+        webm_path = _capture_scroll(
+            nav_url, tmp_dir, width, height, script, timeout,
+            storage_state=storage_state,
+            extra_cookies=extra_cookies,
+        )
         _finalize(webm_path, output_path, suffix, wallpaper, width, height, max_duration)
