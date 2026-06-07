@@ -41,7 +41,7 @@ def _print_help() -> None:
     console.print()
     console.print(
         Panel.fit(
-            "[bold cyan]flowframe[/bold cyan]  [dim]v0.2.0[/dim]\n"
+            "[bold cyan]flowframe[/bold cyan]  [dim]v0.2.1[/dim]\n"
             "[italic dim]Record a smooth-scrolling video of a webpage.[/italic dim]",
             border_style="cyan",
             padding=(0, 2),
