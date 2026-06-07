@@ -91,6 +91,10 @@ def _capture_scroll(
     timeout: float,
     storage_state: str | None = None,
     extra_cookies: list[dict] | None = None,
+    is_mobile: bool = False,
+    device_scale_factor: float = 1.0,
+    has_touch: bool = False,
+    user_agent: str | None = None,
 ) -> Path:
     """Open *nav_url*, run the scroll *script*, and return the raw ``.webm`` path."""
     with sync_playwright() as pw:
@@ -100,6 +104,10 @@ def _capture_scroll(
             record_video_dir=tmp_dir,
             record_video_size={"width": width, "height": height},
             storage_state=storage_state,
+            is_mobile=is_mobile,
+            device_scale_factor=device_scale_factor,
+            has_touch=has_touch,
+            user_agent=user_agent,
         )
         if extra_cookies:
             context.add_cookies(extra_cookies)
@@ -158,6 +166,11 @@ def record(
     timeout: float = 30000,
     storage_state: str | None = None,
     cookies: list[str] | None = None,
+    is_mobile: bool = False,
+    device_scale_factor: float = 1.0,
+    has_touch: bool = False,
+    user_agent: str | None = None,
+    pointer: bool = False,
 ) -> None:
     """Record a smooth-scrolling video of a webpage.
 
@@ -185,6 +198,11 @@ def record(
         cookies: List of inline cookie strings in Set-Cookie style,
             e.g. ``["name=value; domain=example.com"]``. Applied on top of any
             *storage_state* that was also provided.
+        is_mobile: Emulate a mobile browser (UA, touch events, viewport scaling).
+        device_scale_factor: CSS device pixel ratio (e.g. 3 for a Retina phone).
+        has_touch: Enable touch event APIs in the browser context.
+        user_agent: Override the browser UA string; ``None`` uses Chromium default.
+        pointer: Inject an animated fake mouse cursor into the recording.
 
     Raises:
         ValueError: If *output* has an unsupported suffix, *max_duration* <= 0,
@@ -211,7 +229,7 @@ def record(
         ensure_ffmpeg("--wallpaper" if wallpaper else ".mp4 output")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    script = build_scroll_script(scroll_speed, max_duration)
+    script = build_scroll_script(scroll_speed, max_duration, pointer=pointer)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         nav_url = _resolve_nav_url(url, tmp_dir, width)
@@ -219,5 +237,9 @@ def record(
             nav_url, tmp_dir, width, height, script, timeout,
             storage_state=storage_state,
             extra_cookies=extra_cookies,
+            is_mobile=is_mobile,
+            device_scale_factor=device_scale_factor,
+            has_touch=has_touch,
+            user_agent=user_agent,
         )
         _finalize(webm_path, output_path, suffix, wallpaper, width, height, max_duration)

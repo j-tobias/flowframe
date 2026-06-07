@@ -5,6 +5,20 @@ import sys
 
 from flowframe.recorder import record
 
+_PRESETS: dict[str, dict] = {
+    "mobile": {
+        "resolution": (390, 844),
+        "scroll_speed": 3.0,
+        "is_mobile": True,
+        "device_scale_factor": 3.0,
+        "has_touch": True,
+        "user_agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+        ),
+    },
+}
+
 
 def _resolution(value: str) -> tuple[int, int]:
     try:
@@ -39,9 +53,11 @@ def _print_help() -> None:
     console.print(
         "  flowframe [bold green]--url[/bold green] URL"
         " [bold green]--output[/bold green] FILE"
+        " [dim][[bold green]--preset[/bold green] NAME][/dim]"
         " [dim][[bold green]--resolution[/bold green] WxH][/dim]"
         " [dim][[bold green]--scroll-speed[/bold green] PX][/dim]"
         " [dim][[bold green]--wallpaper[/bold green]][/dim]"
+        " [dim][[bold green]--pointer[/bold green]][/dim]"
         " [dim][[bold green]--max-duration[/bold green] SECS][/dim]"
         " [dim][[bold green]--timeout[/bold green] MS][/dim]"
         " [dim][[bold green]--storage-state[/bold green] FILE][/dim]"
@@ -66,19 +82,29 @@ def _print_help() -> None:
         "[bold red]required[/bold red]  Destination file  [dim].mp4[/dim] or [dim].webm[/dim]",
     )
     table.add_row(
+        "--preset",
+        "NAME",
+        "Shorthand config  [dim]mobile[/dim] → 390×844, iPhone UA, touch, 3× DPR",
+    )
+    table.add_row(
         "--resolution",
         "WxH",
-        "Viewport size  [dim]default: 1920x1080[/dim]",
+        "Viewport size  [dim]default: 1920x1080  (overrides preset)[/dim]",
     )
     table.add_row(
         "--scroll-speed",
         "PX",
-        "Pixels scrolled per frame at ~60 fps  [dim]default: 4.0[/dim]",
+        "Pixels scrolled per frame at ~60 fps  [dim]default: 4.0  (overrides preset)[/dim]",
     )
     table.add_row(
         "--wallpaper",
         "",
         "Composite over a macOS-style gradient background with rounded corners and shadow",
+    )
+    table.add_row(
+        "--pointer",
+        "",
+        "Overlay an animated fake mouse cursor that drifts naturally across the viewport",
     )
     table.add_row(
         "--max-duration",
@@ -113,6 +139,22 @@ def _print_help() -> None:
         "  flowframe"
         " [green]--url[/green] https://example.com"
         " [green]--output[/green] demo.mp4"
+    )
+    console.print()
+    console.print("  [dim]# Mobile-phone viewport with iPhone UA and touch emulation[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://example.com"
+        " [green]--output[/green] demo.mp4"
+        " [green]--preset[/green] mobile"
+    )
+    console.print()
+    console.print("  [dim]# Add an animated mouse cursor to the recording[/dim]")
+    console.print(
+        "  flowframe"
+        " [green]--url[/green] https://example.com"
+        " [green]--output[/green] demo.mp4"
+        " [green]--pointer[/green]"
     )
     console.print()
     console.print("  [dim]# 720p WebM with faster scroll — no extra dependencies[/dim]")
@@ -176,6 +218,10 @@ def _print_help() -> None:
                   "  ([dim]'name=value; domain=...'[/dim])")
     console.print("  [cyan]•[/cyan] [bold]--storage-state[/bold] and [bold]--cookie[/bold] can be combined"
                   "  ([dim]cookies are applied on top[/dim])")
+    console.print("  [cyan]•[/cyan] [bold]--preset mobile[/bold] sets 390×844, iPhone UA, 3× DPR, and touch"
+                  "  ([dim]--resolution / --scroll-speed override those defaults[/dim])")
+    console.print("  [cyan]•[/cyan] [bold]--pointer[/bold] injects a fake cursor via JS — "
+                  "headless Chromium does not record the real OS pointer")
     console.print()
 
 
@@ -192,23 +238,35 @@ def main() -> None:
     parser.add_argument("--url", required=True, help="URL of the page or PDF to record")
     parser.add_argument("--output", required=True, help="Destination file (.mp4 or .webm)")
     parser.add_argument(
+        "--preset",
+        default=None,
+        choices=list(_PRESETS),
+        metavar="NAME",
+        help=f"Shorthand config ({', '.join(_PRESETS)})",
+    )
+    parser.add_argument(
         "--resolution",
-        default="1920x1080",
+        default=None,
         type=_resolution,
         metavar="WxH",
-        help="Viewport size (default: 1920x1080)",
+        help="Viewport size (default: 1920x1080, or preset value)",
     )
     parser.add_argument(
         "--scroll-speed",
-        default=4.0,
+        default=None,
         type=float,
         metavar="PX",
-        help="Pixels scrolled per frame at ~60fps (default: 4.0)",
+        help="Pixels scrolled per frame at ~60fps (default: 4.0, or preset value)",
     )
     parser.add_argument(
         "--wallpaper",
         action="store_true",
         help="Composite over a macOS-style gradient background with rounded corners and shadow",
+    )
+    parser.add_argument(
+        "--pointer",
+        action="store_true",
+        help="Overlay an animated fake mouse cursor on the recording",
     )
     parser.add_argument(
         "--max-duration",
@@ -238,7 +296,11 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    width, height = args.resolution
+
+    preset = _PRESETS.get(args.preset or "", {})
+    resolution = args.resolution or preset.get("resolution") or (1920, 1080)
+    scroll_speed = args.scroll_speed if args.scroll_speed is not None else preset.get("scroll_speed", 4.0)
+    width, height = resolution
 
     print(f"Recording {args.url} → {args.output} ...", flush=True)
     try:
@@ -247,12 +309,17 @@ def main() -> None:
             output=args.output,
             width=width,
             height=height,
-            scroll_speed=args.scroll_speed,
+            scroll_speed=scroll_speed,
             wallpaper=args.wallpaper,
+            pointer=args.pointer,
             max_duration=args.max_duration,
             timeout=args.timeout,
             storage_state=args.storage_state,
             cookies=args.cookie,
+            is_mobile=preset.get("is_mobile", False),
+            device_scale_factor=preset.get("device_scale_factor", 1.0),
+            has_touch=preset.get("has_touch", False),
+            user_agent=preset.get("user_agent"),
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

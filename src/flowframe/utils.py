@@ -96,18 +96,47 @@ def run_ffmpeg(args: list[str], *, what: str) -> None:
         )
 
 
-def build_scroll_script(scroll_speed: float, max_duration: float | None) -> str:
+def build_scroll_script(
+    scroll_speed: float,
+    max_duration: float | None,
+    pointer: bool = False,
+) -> str:
     """Build the JS scroll loop, optionally bounded by a wall-clock deadline.
 
     Scrolls *scroll_speed* px every ~16ms and resolves once the page bottom is
     reached. When *max_duration* is set, the loop also resolves after that many
-    seconds, truncating the recording at the cap.
+    seconds, truncating the recording at the cap. When *pointer* is True, a
+    fake mouse cursor is injected and drifts naturally across the viewport.
     """
     deadline_ms = "null" if max_duration is None else int(max_duration * 1000)
+
+    pointer_js = ""
+    if pointer:
+        pointer_js = """
+            const _cur = document.createElement('div');
+            _cur.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;left:0;top:0;';
+            _cur.innerHTML = '<svg viewBox="0 0 14 20" xmlns="http://www.w3.org/2000/svg" style="width:14px;height:20px;filter:drop-shadow(1px 1px 2px rgba(0,0,0,0.55))"><path d="M1,1 L1,17 L5,13 L8,19 L10.5,18 L7.5,12 L13,12 Z" fill="white" stroke="black" stroke-width="1"/></svg>';
+            document.body.appendChild(_cur);
+            let _px = window.innerWidth * 0.42, _py = window.innerHeight * 0.3;
+            let _tx = _px, _ty = _py, _lastMove = Date.now();
+            (function _animCur() {
+                if (Date.now() - _lastMove > 2200) {
+                    _tx = window.innerWidth  * (0.15 + Math.random() * 0.7);
+                    _ty = window.innerHeight * (0.10 + Math.random() * 0.8);
+                    _lastMove = Date.now();
+                }
+                _px += (_tx - _px) * 0.035;
+                _py += (_ty - _py) * 0.035;
+                _cur.style.transform = 'translate(' + _px + 'px,' + _py + 'px)';
+                requestAnimationFrame(_animCur);
+            })();
+        """
+
     return f"""
         () => new Promise((resolve) => {{
             const start = Date.now();
             const deadlineMs = {deadline_ms};
+            {pointer_js}
             const id = setInterval(() => {{
                 window.scrollBy(0, {scroll_speed});
                 const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight;
