@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -24,6 +25,7 @@ def _composite_wallpaper(
     width: int,
     height: int,
     max_duration: float | None,
+    loading_trim: float = 1.0,
 ) -> None:
     scale = 0.88
     corner_r = 20   # rounded corner radius (px, in scaled-video space)
@@ -61,7 +63,7 @@ def _composite_wallpaper(
 
     cap = ["-t", str(max_duration)] if max_duration is not None else []
     run_ffmpeg(
-        ["-ss", "1", "-i", str(webm_path),   # skip the loading blank first second
+        ["-ss", str(loading_trim), "-i", str(webm_path),
          "-i", str(_WALLPAPER),
          "-filter_complex", fc,
          *cap,
@@ -82,6 +84,9 @@ def _resolve_nav_url(url: str, tmp_dir: str, width: int) -> str:
     return render_pdf_to_html(pdf_bytes, Path(tmp_dir) / "pdf", width)
 
 
+_RENDER_SETTLE_MS = 500  # extra wait after networkidle to let visual rendering finish
+
+
 def _capture_scroll(
     nav_url: str,
     tmp_dir: str,
@@ -95,10 +100,17 @@ def _capture_scroll(
     device_scale_factor: float = 1.0,
     has_touch: bool = False,
     user_agent: str | None = None,
-) -> Path:
-    """Open *nav_url*, run the scroll *script*, and return the raw ``.webm`` path."""
+) -> tuple[Path, float]:
+    """Open *nav_url*, run the scroll *script*, and return the raw ``.webm`` path
+    together with the measured loading duration in seconds.
+
+    Recording begins at context creation, so the webm contains a loading lead-in
+    that must be trimmed later. The returned duration covers that lead-in including
+    a brief rendering-settle pause added after ``networkidle``.
+    """
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
+        t_start = time.monotonic()
         context = browser.new_context(
             viewport={"width": width, "height": height},
             record_video_dir=tmp_dir,
@@ -114,6 +126,8 @@ def _capture_scroll(
         page = context.new_page()
         page.set_default_navigation_timeout(timeout)
         page.goto(nav_url, wait_until="networkidle")
+        page.wait_for_timeout(_RENDER_SETTLE_MS)
+        loading_trim = time.monotonic() - t_start
         page.evaluate(script)
 
         # Must read before context.close() — afterwards .video becomes None.
@@ -122,7 +136,7 @@ def _capture_scroll(
         context.close()  # flushes and finalises the .webm on disk
         browser.close()
 
-    return webm_path
+    return webm_path, loading_trim
 
 
 def _finalize(
@@ -133,24 +147,23 @@ def _finalize(
     width: int,
     height: int,
     max_duration: float | None,
+    loading_trim: float = 1.0,
 ) -> None:
     """Produce the final output from the raw recording.
 
     Wallpaper compositing and plain ffmpeg conversion (.mp4, or .webm when ffmpeg
-    is available) trim the 1s loading lead-in and hard-cap the length to
-    *max_duration*. The only path that does neither is a .webm copy made when
-    ffmpeg isn't installed — there the scroll-loop cap is the only bound.
+    is available) trim the loading lead-in (measured at capture time) and hard-cap
+    the length to *max_duration*. The only path that does neither is a .webm copy
+    made when ffmpeg isn't installed — there the scroll-loop cap is the only bound.
     """
     if wallpaper:
-        _composite_wallpaper(webm_path, output_path, width, height, max_duration)
+        _composite_wallpaper(webm_path, output_path, width, height, max_duration, loading_trim)
     elif suffix == ".webm" and shutil.which("ffmpeg") is None:
-        # No ffmpeg available — copy as-is, skip the 1-second trim
         shutil.copy2(webm_path, output_path)
     else:
-        # mp4, or webm with ffmpeg available (trim the loading blank first second)
         cap = ["-t", str(max_duration)] if max_duration is not None else []
         run_ffmpeg(
-            ["-ss", "1", "-i", str(webm_path), *cap, str(output_path)],
+            ["-ss", str(loading_trim), "-i", str(webm_path), *cap, str(output_path)],
             what="conversion",
         )
 
@@ -233,7 +246,7 @@ def record(
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         nav_url = _resolve_nav_url(url, tmp_dir, width)
-        webm_path = _capture_scroll(
+        webm_path, loading_trim = _capture_scroll(
             nav_url, tmp_dir, width, height, script, timeout,
             storage_state=storage_state,
             extra_cookies=extra_cookies,
@@ -242,4 +255,4 @@ def record(
             has_touch=has_touch,
             user_agent=user_agent,
         )
-        _finalize(webm_path, output_path, suffix, wallpaper, width, height, max_duration)
+        _finalize(webm_path, output_path, suffix, wallpaper, width, height, max_duration, loading_trim)
