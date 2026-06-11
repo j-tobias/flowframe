@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from importlib.metadata import PackageNotFoundError, version
 
 from flowframe.recorder import record
+
+try:
+    _VERSION = version("flowframe")
+except PackageNotFoundError:
+    _VERSION = "dev"
 
 _PRESETS: dict[str, dict] = {
     "mobile": {
@@ -41,7 +47,7 @@ def _print_help() -> None:
     console.print()
     console.print(
         Panel.fit(
-            "[bold cyan]flowframe[/bold cyan]  [dim]v0.2.1[/dim]\n"
+            f"[bold cyan]flowframe[/bold cyan]  [dim]v{_VERSION}[/dim]\n"
             "[italic dim]Record a smooth-scrolling video of a webpage.[/italic dim]",
             border_style="cyan",
             padding=(0, 2),
