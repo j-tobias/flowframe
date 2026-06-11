@@ -9,9 +9,12 @@ from playwright.sync_api import sync_playwright
 
 from flowframe.pdf import render_pdf_to_html, try_load_pdf
 from flowframe.utils import (
+    COVER_ELEMENT_ID,
     build_scroll_script,
+    detect_leading_black_end,
     ensure_ffmpeg,
     parse_cookie_string,
+    probe_video_duration,
     run_ffmpeg,
     validate_output_suffix,
 )
@@ -44,8 +47,10 @@ def _composite_wallpaper(
         f"[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height}[bg]",
         # Scale recording; convert to rgba; stamp rounded corners into alpha.
+        # setpts re-zeroes the post-seek timestamps — without it the overlay
+        # emits wallpaper-only frames until the video stream's first pts.
         # Long-form option names (red_expr etc.) avoid the r=/r(X,Y) naming clash.
-        f"[0:v]scale=trunc(iw*{scale}/2)*2:trunc(ih*{scale}/2)*2[sc]",
+        f"[0:v]setpts=PTS-STARTPTS,scale=trunc(iw*{scale}/2)*2:trunc(ih*{scale}/2)*2[sc]",
         f"[sc]format=rgba,"
         f"geq=red_expr='r(X,Y)':green_expr='g(X,Y)':blue_expr='b(X,Y)':"
         f"alpha_expr='{corner_mask}'[rnd]",
@@ -85,6 +90,36 @@ def _resolve_nav_url(url: str, tmp_dir: str, width: int) -> str:
 
 
 _RENDER_SETTLE_MS = 500  # extra wait after networkidle to let visual rendering finish
+_SCROLL_HOLD_MS = 500    # static fully-loaded hold before scrolling; the trim lands inside it
+
+# Resolves once webfonts are loaded and two animation frames have painted,
+# i.e. the loaded DOM is actually on screen — networkidle alone doesn't ensure that.
+_SETTLE_JS = """
+    () => document.fonts.ready.then(
+        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    )
+"""
+
+# Installed at document start so the recording shows solid black instead of a
+# partially loaded page; top frame only, or iframes would stay covered after
+# the main cover is removed. The MutationObserver handles running before
+# <html> exists.
+_COVER_INIT_JS = f"""
+    (() => {{
+        if (window !== window.top) return;
+        const add = () => {{
+            const d = document.createElement('div');
+            d.id = '{COVER_ELEMENT_ID}';
+            d.style.cssText = 'position:fixed;inset:0;background:#000;' +
+                              'z-index:2147483647;pointer-events:none;';
+            document.documentElement.appendChild(d);
+        }};
+        if (document.documentElement) add();
+        else new MutationObserver((m, o) => {{
+            if (document.documentElement) {{ add(); o.disconnect(); }}
+        }}).observe(document, {{ childList: true }});
+    }})();
+"""
 
 
 def _capture_scroll(
@@ -102,15 +137,17 @@ def _capture_scroll(
     user_agent: str | None = None,
 ) -> tuple[Path, float]:
     """Open *nav_url*, run the scroll *script*, and return the raw ``.webm`` path
-    together with the measured loading duration in seconds.
+    together with the lead-in trim offset in seconds.
 
-    Recording begins at context creation, so the webm contains a loading lead-in
-    that must be trimmed later. The returned duration covers that lead-in including
-    a brief rendering-settle pause added after ``networkidle``.
+    Wall-clock timing cannot locate the lead-in reliably: frames start at the
+    page's first paint and keep being appended while ``context.close()``
+    flushes, so both ends of the video timeline are fuzzy. Instead the trim
+    point is burned into the video itself — an init script covers the page in
+    solid black until the scroll script reveals the fully-loaded page, and
+    ffmpeg blackdetect finds that transition frame-accurately afterwards.
     """
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        t_start = time.monotonic()
         context = browser.new_context(
             viewport={"width": width, "height": height},
             record_video_dir=tmp_dir,
@@ -121,20 +158,42 @@ def _capture_scroll(
             has_touch=has_touch,
             user_agent=user_agent,
         )
+        context.add_init_script(_COVER_INIT_JS)
         if extra_cookies:
             context.add_cookies(extra_cookies)
         page = context.new_page()
         page.set_default_navigation_timeout(timeout)
         page.goto(nav_url, wait_until="networkidle")
+        page.evaluate(_SETTLE_JS)
         page.wait_for_timeout(_RENDER_SETTLE_MS)
-        loading_trim = time.monotonic() - t_start
+
+        t_mark = time.monotonic()  # cover comes off right after this
         page.evaluate(script)
 
         # Must read before context.close() — afterwards .video becomes None.
         webm_path = Path(page.video.path())
 
+        post_reveal = time.monotonic() - t_mark
         context.close()  # flushes and finalises the .webm on disk
+        close_secs = time.monotonic() - t_mark - post_reveal
         browser.close()
+
+    black_end = detect_leading_black_end(webm_path)
+    if black_end is not None:
+        # Frame-accurate: first frame after the trim is the freshly revealed,
+        # fully-loaded page. The tiny epsilon guards against the boundary
+        # frame being counted as black on either side of a rounding edge.
+        loading_trim = black_end + 0.02
+    else:
+        # No ffmpeg, or detection failed — estimate from the end of the video,
+        # whose true position lies somewhere within the close() flush window;
+        # bias into the middle of the static hold to absorb that uncertainty.
+        duration = probe_video_duration(webm_path)
+        if duration is not None:
+            estimate = duration - post_reveal - close_secs / 2
+            loading_trim = max(estimate, 0.0) + _SCROLL_HOLD_MS / 2000
+        else:
+            loading_trim = 0.0  # nothing to measure with; trim nothing
 
     return webm_path, loading_trim
 
@@ -242,7 +301,9 @@ def record(
         ensure_ffmpeg("--wallpaper" if wallpaper else ".mp4 output")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    script = build_scroll_script(scroll_speed, max_duration, pointer=pointer)
+    script = build_scroll_script(
+        scroll_speed, max_duration, pointer=pointer, start_hold_ms=_SCROLL_HOLD_MS
+    )
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         nav_url = _resolve_nav_url(url, tmp_dir, width)

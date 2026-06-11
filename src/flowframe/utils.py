@@ -6,11 +6,17 @@ scroll-script construction) stays cheap to import and easy to reason about.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 _VALID_SUFFIXES = {".mp4", ".webm"}
+
+# Id of the black element that hides the page while it loads. Installed by the
+# recorder's init script, removed by the scroll script, and located in the
+# finished video via ffmpeg blackdetect to find the exact trim point.
+COVER_ELEMENT_ID = "__flowframe_cover__"
 
 
 def parse_cookie_string(cookie_str: str) -> dict:
@@ -80,6 +86,52 @@ def ensure_ffmpeg(reason: str) -> None:
     )
 
 
+def probe_video_duration(path: Path) -> float | None:
+    """Return the duration of the video at *path* in seconds, or None.
+
+    Returns None when ffprobe is missing or the container reports no duration,
+    in which case the caller must fall back to a wall-clock estimate.
+    """
+    if shutil.which("ffprobe") is None:
+        return None
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+_BLACK_INTERVAL_RE = re.compile(r"black_start:(\d+(?:\.\d+)?)\s+black_end:(\d+(?:\.\d+)?)")
+
+
+def detect_leading_black_end(path: Path) -> float | None:
+    """Return when the black loading cover ends in the video at *path*.
+
+    Runs ffmpeg blackdetect and returns the end of the first black interval
+    that starts within the first second (the cover is up from the very first
+    frame, so a later start means detection picked up something else). Returns
+    None when ffmpeg is missing or no such interval exists.
+    """
+    if shutil.which("ffmpeg") is None:
+        return None
+    result = subprocess.run(
+        ["ffmpeg", "-i", str(path), "-vf", "blackdetect=d=0.2:pix_th=0.10",
+         "-an", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+    )
+    for match in _BLACK_INTERVAL_RE.finditer(result.stderr):
+        start, end = float(match.group(1)), float(match.group(2))
+        if start <= 1.0:
+            return end
+    return None
+
+
 def run_ffmpeg(args: list[str], *, what: str) -> None:
     """Run ``ffmpeg <args>``, raising ``RuntimeError`` on a non-zero exit.
 
@@ -100,6 +152,7 @@ def build_scroll_script(
     scroll_speed: float,
     max_duration: float | None,
     pointer: bool = False,
+    start_hold_ms: int = 0,
 ) -> str:
     """Build the JS scroll loop, optionally bounded by a wall-clock deadline.
 
@@ -107,6 +160,12 @@ def build_scroll_script(
     reached. When *max_duration* is set, the loop also resolves after that many
     seconds, truncating the recording at the cap. When *pointer* is True, a
     fake mouse cursor is injected and drifts naturally across the viewport.
+    *start_hold_ms* keeps the fully-loaded page static before scrolling begins,
+    giving the lead-in trim a window of known-good frames to land in.
+
+    The script first removes the loading cover (see ``COVER_ELEMENT_ID``), so
+    the black-to-content transition in the video marks the exact moment the
+    fully-loaded page becomes visible.
     """
     deadline_ms = "null" if max_duration is None else int(max_duration * 1000)
 
@@ -134,17 +193,21 @@ def build_scroll_script(
 
     return f"""
         () => new Promise((resolve) => {{
+            const cover = document.getElementById('{COVER_ELEMENT_ID}');
+            if (cover) cover.remove();
             const start = Date.now();
             const deadlineMs = {deadline_ms};
             {pointer_js}
-            const id = setInterval(() => {{
-                window.scrollBy(0, {scroll_speed});
-                const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight;
-                const timedOut = deadlineMs !== null && (Date.now() - start) >= deadlineMs;
-                if (atBottom || timedOut) {{
-                    clearInterval(id);
-                    resolve();
-                }}
-            }}, 16);
+            setTimeout(() => {{
+                const id = setInterval(() => {{
+                    window.scrollBy(0, {scroll_speed});
+                    const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight;
+                    const timedOut = deadlineMs !== null && (Date.now() - start) >= deadlineMs;
+                    if (atBottom || timedOut) {{
+                        clearInterval(id);
+                        resolve();
+                    }}
+                }}, 16);
+            }}, {start_hold_ms});
         }})
     """
